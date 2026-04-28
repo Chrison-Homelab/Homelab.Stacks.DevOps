@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose *)",
+      "PowerShell(docker compose *)",
+      "PowerShell(podman *)"
+    ]
+  }
+}
