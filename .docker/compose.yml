@@ -1,0 +1,25 @@
+networks:
+  devops:
+    name: devops-network
+    driver: bridge
+    external: false
+
+services:
+  server:
+    image: ${FORGEJO_MIRROR:-codeberg.org}/forgejo/forgejo:${FORGEJO_VERSION:-15}
+    container_name: forgejo
+    env_file:
+      - .env
+      - .env.forgejo
+    environment:
+      - USER_UID=${UID}
+      - USER_GID=${GID}
+      - TZ=${TZ}
+    restart: always
+    networks:
+      - devops
+    volumes:
+      - ${FORGEJO_DATA:-./data/forgejo}:/data
+    ports:
+      - '${FORGEJO_HTTP_PORT:-3000}:3000'
+      - '${FORGEJO_SSH_PORT:-222}:22'
