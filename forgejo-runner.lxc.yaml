@@ -1,0 +1,30 @@
+# Forgejo Runner — CI/CD executor for Forgejo Actions.
+#
+# community-scripts: ct/forgejo-runner.sh — DEV channel only (lives in
+# community-scripts/ProxmoxVED, marked "In Development"). We're taking it for a
+# test ride. Validate against ../../Infrastructure/schema/shape.schema.json.
+
+apiVersion: homelab/v1
+kind: LXC
+
+metadata:
+  name: forgejo-runner
+  stack: DevOps
+  tags: [ci, forge]
+
+spec:
+  app: forgejo-runner
+  source:
+    channel: dev         # → community-scripts/ProxmoxVED (overrides stack default 'stable')
+    # ref: <pin a SHA here for reproducibility once the script stabilises>
+  ctid: 3001
+  cores: 4               # build muscle (overrides script default 2)
+  memory: 4096           # MB
+  disk: 16               # GB
+  features:
+    nesting: true        # runners typically need to run containers
+  # node/os/network/storage/timezone inherited from the DevOps stack
+
+  # depends-on: forgejo (3000) — registration needs the Forgejo URL + a runner
+  # registration token. Dependency/secret modelling is deferred (see the
+  # "post-create config, dependencies & secrets" task). Register manually for now.

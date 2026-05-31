@@ -1,0 +1,26 @@
+# Forgejo — self-hosted Git forge.
+#
+# community-scripts: ct/forgejo.sh (stable / ProxmoxVE). Inherits node, os,
+# network, storage, timezone from ./stack.yaml. Validate against
+# ../../Infrastructure/schema/shape.schema.json.
+
+apiVersion: homelab/v1
+kind: LXC
+
+metadata:
+  name: forgejo
+  stack: DevOps
+  tags: [git, forge]
+
+spec:
+  app: forgejo
+  ctid: 3000
+  cores: 2
+  memory: 2048           # MB
+  disk: 20               # GB — bumped from the script default (10); repos grow
+  # source/node/os/network/storage/timezone inherited from the DevOps stack
+
+  # Post-create (manual / converge — NOT done by community-scripts):
+  #   - admin user + base URL
+  #   - TLS via Traefik (2007) / cloudflared (2001)
+  #   - repo data placement (local-lvm now; NFS pending the mount-hardening task, BL-016)
