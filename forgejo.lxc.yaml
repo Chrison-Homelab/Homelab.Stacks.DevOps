@@ -20,7 +20,8 @@ spec:
   disk: 20               # GB — bumped from the script default (10); repos grow
   # source/node/os/network/storage/timezone inherited from the DevOps stack
 
-  # Post-create (manual / converge — NOT done by community-scripts):
-  #   - admin user + base URL
-  #   - TLS via Traefik (2007) / cloudflared (2001)
-  #   - repo data placement (local-lvm now; NFS pending the mount-hardening task, BL-016)
+  # Post-create wiring (converge / BL-010 — NOT done by community-scripts):
+  config:
+    rootUrl: https://forgejo.chrison.dev   # provisioner sets [server] ROOT_URL + DOMAIN
+  # TLS is fronted by the cloudflared tunnel (see cloudflared.lxc.yaml).
+  # Repo data on local-lvm for now; NFS pending BL-016.
