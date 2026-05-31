@@ -1,0 +1,28 @@
+# Cloudflared — dedicated Cloudflare Tunnel connector for the DevOps stack.
+#
+# community-scripts: ct/cloudflared.sh (stable / ProxmoxVE). Deliberately SEPARATE
+# from the existing cloudflared CT 2001 (left untouched) — this tunnel only
+# fronts DevOps services (e.g. forgejo.chrison.dev → forgejo 3000). Validate
+# against ../../Infrastructure/schema/shape.schema.json.
+
+apiVersion: homelab/v1
+kind: LXC
+
+metadata:
+  name: cloudflared
+  stack: DevOps
+  tags: [network, cloudflare, tunnel]
+
+spec:
+  app: cloudflared
+  ctid: 3004
+  cores: 1
+  memory: 512            # MB
+  disk: 2                # GB
+  # node/os/network/storage/timezone inherited from the DevOps stack
+
+  # Post-create (add-only on Cloudflare — see CLAUDE.md "Shared external accounts"):
+  #   - a NEW named tunnel (does not touch existing tunnels / CT 2001)
+  #   - tunnel ingress: forgejo.chrison.dev → http://10.10.138.32:3000 (forgejo 3000)
+  #   - a NEW DNS CNAME forgejo.chrison.dev → <tunnel-id>.cfargotunnel.com
+  #   - run: cloudflared service with the tunnel token (token from secrets.env)
