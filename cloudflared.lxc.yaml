@@ -21,8 +21,16 @@ spec:
   disk: 2                # GB
   # node/os/network/storage/timezone inherited from the DevOps stack
 
-  # Post-create (add-only on Cloudflare — see CLAUDE.md "Shared external accounts"):
-  #   - a NEW named tunnel (does not touch existing tunnels / CT 2001)
-  #   - tunnel ingress: forgejo.chrison.dev → http://10.10.138.32:3000 (forgejo 3000)
-  #   - a NEW DNS CNAME forgejo.chrison.dev → <tunnel-id>.cfargotunnel.com
-  #   - run: cloudflared service with the tunnel token (token from secrets.env)
+  # Post-create wiring (converge / BL-010 — ADD-ONLY on Cloudflare, see CLAUDE.md):
+  dependsOn: [forgejo]
+  config:
+    tunnel: Homelab.Stacks.DevOps            # NEW named tunnel — never touches existing tunnels / CT 2001
+    ingress:
+      - { hostname: forgejo.chrison.dev, service: "http://forgejo:3000" }   # 'forgejo' resolves via dependsOn
+  secrets:
+    - name: tunnelToken
+      valueFrom:
+        provider:
+          name: cloudflare
+          action: tunnel-token               # provisioner creates the tunnel + DNS CNAME (add-only) and returns its token
+          auth: { env: CF_API_TOKEN }        # scoped token from secrets.env

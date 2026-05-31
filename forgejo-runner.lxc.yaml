@@ -25,6 +25,11 @@ spec:
     nesting: true        # runners typically need to run containers
   # node/os/network/storage/timezone inherited from the DevOps stack
 
-  # depends-on: forgejo (3000) — registration needs the Forgejo URL + a runner
-  # registration token. Dependency/secret modelling is deferred (see the
-  # "post-create config, dependencies & secrets" task). Register manually for now.
+  # Post-create wiring (converge / BL-010):
+  dependsOn: [forgejo]                       # order after forgejo; its URL is resolved for registration
+  config:
+    runnerLabels: [homelab]
+  secrets:
+    - name: runnerToken
+      valueFrom:
+        service: { ref: forgejo, action: generate-runner-token }   # derived from Forgejo at provision time

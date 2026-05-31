@@ -22,5 +22,14 @@ spec:
     nesting: true        # builds often need Docker
   # node/os/network/storage/timezone inherited from the DevOps stack
 
-  # depends-on: a GitHub repo/org + a runner registration token (secret).
-  # Registration is manual until secret modelling lands (see deferred task).
+  # Post-create wiring (converge / BL-010):
+  config:
+    githubOrg: Chrison-dev
+  secrets:
+    - name: registrationToken
+      valueFrom:
+        provider:
+          name: github
+          action: org-runner-token
+          with: { org: Chrison-dev }
+          auth: { env: GH_RUNNER_PAT }       # PAT resolved from secrets.env
