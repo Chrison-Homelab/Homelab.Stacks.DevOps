@@ -1,0 +1,26 @@
+# GitHub Runner — self-hosted runner offered to GitHub projects.
+#
+# community-scripts: ct/github-runner.sh (stable / ProxmoxVE). This is a NEW,
+# independent runner — the existing CT 2005 is intentionally LEFT UNTOUCHED and
+# unmanaged by IaC. Validate against ../../Infrastructure/schema/shape.schema.json.
+
+apiVersion: homelab/v1
+kind: LXC
+
+metadata:
+  name: github-runner
+  stack: DevOps
+  tags: [ci, github]
+
+spec:
+  app: github-runner
+  ctid: 3002
+  cores: 4               # build muscle (overrides script default 2)
+  memory: 4096           # MB
+  disk: 16               # GB
+  features:
+    nesting: true        # builds often need Docker
+  # node/os/network/storage/timezone inherited from the DevOps stack
+
+  # depends-on: a GitHub repo/org + a runner registration token (secret).
+  # Registration is manual until secret modelling lands (see deferred task).

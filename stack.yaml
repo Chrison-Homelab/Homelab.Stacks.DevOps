@@ -1,0 +1,41 @@
+# DevOps stack — self-hosted source control + CI/CD.
+#
+# Owns CTID block 3000–3999 and the defaults every member inherits. Members
+# (forgejo, forgejo-runner, github-runner, …) live alongside this file and only
+# declare what differs. Deployed via community-scripts over SSH — see the
+# renderer at ../../Infrastructure/deploy/Deploy-Shape.ps1 and the plan at
+# ../../docs/plans/BL-015-devops-stack.md. Validate against
+# ../../Infrastructure/schema/shape.schema.json.
+#
+# CTID allocation policy: members set ctid EXPLICITLY (omission is an error).
+# `ctid: auto` exists for the rare case but must be typed deliberately.
+
+apiVersion: homelab/v1
+kind: Stack
+
+metadata:
+  name: DevOps
+  tags: [devops]
+
+spec:
+  ctidRange:
+    start: 3000           # guard rail: a member ctid outside this block is rejected
+    end: 3999             # also the pool for the rare `ctid: auto`
+  defaults:
+    node: desktop-01      # CI build muscle — 12 cores, large local-lvm
+    source:
+      channel: stable     # → community-scripts/ProxmoxVE (override per-member, e.g. dev)
+      ref: main
+    os: debian
+    osVersion: 13
+    unprivileged: true
+    storage: local-lvm
+    templateStorage: local
+    onboot: true
+    network:
+      bridge: vmbr0
+      vlan: 1010          # real tag → interface name=vlan1010,tag=1010
+      ipv4: dhcp
+      ipv6: none
+    timezone: Pacific/Auckland
+    tags: [devops, community-script]
