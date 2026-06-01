@@ -24,4 +24,16 @@ spec:
   config:
     rootUrl: https://forgejo.chrison.dev   # provisioner sets [server] ROOT_URL + DOMAIN
   # TLS is fronted by the cloudflared tunnel (see cloudflared.lxc.yaml).
-  # Repo data on local-lvm for now; NFS pending BL-016.
+
+  # Repo data on the NAS, host-level + gated (BL-016). A storage-backed volume
+  # on the Synology NFS storage, mounted at /mnt/forgejo-data — the CT won't
+  # start if the NAS is offline, and it's never mounted inside the guest.
+  # app.ini is then repointed: [repository] ROOT + [lfs] PATH -> /mnt/forgejo-data/…
+  # The SQLite DB ([database] PATH) and app.ini/logs deliberately STAY on the
+  # local rootfs (SQLite over NFS = corruption risk).
+  mounts:
+    - type: nfs
+      storage: ds1813-nfs-volume-3
+      size: "50G"
+      target: /mnt/forgejo-data
+      backup: false                        # data lives on the NAS; keep it out of vzdump
