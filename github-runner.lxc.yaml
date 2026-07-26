@@ -24,12 +24,12 @@ spec:
 
   # Post-create wiring (converge / BL-010):
   config:
-    githubOrg: Chrison-dev
+    githubOrg: Chrison-Homelab
   secrets:
     - name: registrationToken
       valueFrom:
         provider:
           name: github
           action: org-runner-token
-          with: { org: Chrison-dev }
+          with: { org: Chrison-Homelab }
           auth: { env: GH_RUNNER_PAT }       # PAT resolved from secrets.env
