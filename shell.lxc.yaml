@@ -1,0 +1,71 @@
+# Shell host — a long-lived tmux server you attach to instead of keeping shells
+# on each laptop (#404).
+#
+#   ssh shell.homelab.chrison.internal -t tmux new -A -s main
+#
+# NODE CHOICE. The milestone originally specced this for hpe-01 on the grounds
+# that desktop-01 is the on-demand sleep target (#191) and a session dialled into
+# unpredictably would block evacuation. That is still true — but desktop-01 has
+# the only silicon worth typing on (Ryzen 5 3600 / 12 threads / 2 TB NVMe) against
+# hpe-01's i5-6500T, and a dedicated always-on powernode is being bought to take
+# this over. So it lands here deliberately and temporarily. Moving it is a one-line
+# `node:` edit plus a converge — nothing below is node-specific.
+#
+# ⚠ While it lives here, desktop-01 must not be armed for sleep: PR3 of #191 is
+#   gated on evacuation, and this CT is exactly the workload that cannot be
+#   evacuated silently.
+#
+# app: debian → ct/debian.sh creates a plain base CT; the `shell` provisioner then
+# installs tmux + the CLI kit, renders the canonical ~/.tmux.conf and the rio
+# terminfo from shell-assets/ (#405), installs the TPM plugins, and enables a
+# systemd unit that brings the session back after a reboot (#408). Validate against
+# ../../Infrastructure/schema/shape.schema.json.
+
+apiVersion: homelab/v1
+kind: LXC
+
+metadata:
+  name: shell
+  stack: DevOps
+  tags: [shell, tmux, dev]
+
+spec:
+  app: debian           # plain base CT (ct/debian.sh) — no community-scripts app to install
+  provisioner: shell    # post-create dispatched to ShellProvisioner
+  ctid: 3003            # the gap between github-runner (3002) and cloudflared (3004)
+  cores: 4
+  memory: 4096          # MB — an editor, a build, and a few Claude Code panes
+  disk: 32              # GB — checkouts + toolchains; local-lvm on desktop-01 has room
+
+  # node/os/network/storage/timezone/onboot inherited from the DevOps stack
+  # (node: desktop-01, VLAN 1010, DHCP).
+  #
+  # ⚠ DHCP + a UniFi reservation, like the other DevOps members — the reservation is
+  #   what makes `shell.homelab.chrison.internal` resolve, and that name is the whole
+  #   point of the shape. Without it the SSH target moves on the next lease.
+
+  # Deliberately NO `features: nesting` — this is a terminal, not a container host.
+  # Add it when something here actually needs to run Docker, not in advance.
+
+  config:
+    user: csimon                 # login user; the tmux server runs as this account
+    session: main                # `tmux new -A -s main` — the session the unit starts at boot
+    assets: shell-assets         # sibling dir: tmux.conf + rio.terminfo, rendered into the CT
+
+    # Public keys allowed to log in as `user`. Public halves only — nothing secret,
+    # which is why this is config and not a `secrets:` entry.
+    authorizedKeys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKpaKcbRzOJqGnC/iPyKp3ZD+10aTjrBkvjv0YACIFA1 csimon@mac"
+
+    # Beyond the provisioner's baseline (tmux, git, curl, ca-certificates,
+    # ncurses-bin for tic, ncurses-term for the tmux-256color entry).
+    packages:
+      - ripgrep
+      - fd-find
+      - jq
+      - tree                     # the tmux-sidebar tree command
+      - unzip
+      - rsync
+      - vim
+      - htop
+      - build-essential
