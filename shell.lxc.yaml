@@ -1,7 +1,19 @@
 # Shell host — a long-lived tmux server you attach to instead of keeping shells
 # on each laptop (#404).
 #
-#   ssh shell.homelab.chrison.internal -t tmux new -A -s main
+#   ssh shell.devops.chrison.internal -t tmux new -A -s main
+#
+# NAMING. Deliberately `devops.chrison.internal`, NOT `shell.homelab.chrison.internal`
+# — the stack gets its own internal subdomain, following the precedent set when Home
+# Assistant moved to `homeassistant.iot.chrison.internal` rather than nesting under
+# homelab. The name then says which STACK owns the box, not which VLAN it happens to
+# sit on, so a re-VLAN or the move to the powernode does not rename anything. It is
+# also the shape the external surface will take for this stack (*.devops.chrison.dev).
+#
+# This is a per-host UniFi local DNS record on the reservation, not a per-network
+# domain: VLAN 1010's domain is `homelab.chrison.internal` and every other member of
+# this stack still answers there. Both names resolving is fine — the record is
+# additive.
 #
 # NODE CHOICE. The milestone originally specced this for hpe-01 on the grounds
 # that desktop-01 is the on-demand sleep target (#191) and a session dialled into
@@ -41,8 +53,9 @@ spec:
   # (node: desktop-01, VLAN 1010, DHCP).
   #
   # ⚠ DHCP + a UniFi reservation, like the other DevOps members — the reservation is
-  #   what makes `shell.homelab.chrison.internal` resolve, and that name is the whole
-  #   point of the shape. Without it the SSH target moves on the next lease.
+  #   what pins the address AND carries the `shell.devops.chrison.internal` local DNS
+  #   record (see NAMING above), and that name is the whole point of the shape. Without
+  #   it the SSH target moves on the next lease.
 
   # Deliberately NO `features: nesting` — this is a terminal, not a container host.
   # Add it when something here actually needs to run Docker, not in advance.
