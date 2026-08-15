@@ -28,7 +28,15 @@ Self-hosted **source control + CI/CD** — the forge and the runners that build 
 | 3000 | `forgejo` | `forgejo` — the Git forge; provisioner sets `ROOT_URL` |
 | 3001 | `forgejo-runner` | `forgejo-runner` — registers against the forge post-create |
 | 3002 | `github-runner` | `github-runner` — self-hosted runner registered to the GitHub org |
+| 3003 | `shell` | `debian` + `provisioner: shell` — the long-lived tmux host (superproject #404) |
 | 3004 | `cloudflared` | `cloudflared` — this stack's dedicated tunnel |
+
+**Internal naming:** the stack is moving to its own subdomain, `*.devops.chrison.internal`,
+rather than nesting under VLAN 1010's `homelab.chrison.internal` — so a name says which *stack*
+owns a box, not which VLAN it sits on, and survives a re-VLAN or a node move. `shell` is the
+first member on it, via a per-host UniFi local DNS record on its DHCP reservation; the others
+still answer on `homelab.` and can be migrated when there is a reason to. The same split is
+intended for the external surface (`*.devops.chrison.dev`).
 
 **Members must set `ctid` explicitly** — omission is an error. `ctid: auto` exists for rare cases
 but has to be typed deliberately.
