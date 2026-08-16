@@ -52,10 +52,15 @@ spec:
   # node/os/network/storage/timezone/onboot inherited from the DevOps stack
   # (node: desktop-01, VLAN 1010, DHCP).
   #
-  # ⚠ DHCP + a UniFi reservation, like the other DevOps members — the reservation is
-  #   what pins the address AND carries the `shell.devops.chrison.internal` local DNS
-  #   record (see NAMING above), and that name is the whole point of the shape. Without
-  #   it the SSH target moves on the next lease.
+  # DHCP + a UniFi reservation, like the other DevOps members. The reservation pins the
+  # address AND carries the `shell.devops.chrison.internal` local DNS record (see NAMING
+  # above) — that name is the whole point of the shape, and without it the SSH target
+  # moves on the next lease. Declared below rather than reserved by hand: converge reads
+  # net0's live MAC after create and reconciles the controller entry (superproject #416).
+  network:
+    reservation:
+      fixedIp: 10.10.135.221
+      localDnsRecord: shell.devops.chrison.internal
 
   # Deliberately NO `features: nesting` — this is a terminal, not a container host.
   # Add it when something here actually needs to run Docker, not in advance.
