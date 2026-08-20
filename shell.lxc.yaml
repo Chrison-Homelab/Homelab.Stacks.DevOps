@@ -46,7 +46,10 @@ spec:
   provisioner: shell    # post-create dispatched to ShellProvisioner
   ctid: 3003            # the gap between github-runner (3002) and cloudflared (3004)
   cores: 4
-  memory: 4096          # MB — an editor, a build, and a few Claude Code panes
+  memory: 6144          # MB — bumped from 4096 (#421). Claude Code documents 4 GB as its
+                        # MINIMUM, and that was the whole allocation, with dotnet builds and
+                        # tmux panes competing for it. LXC memory is a cap, not a reservation,
+                        # so the headroom costs nothing until used.
   disk: 32              # GB — checkouts + toolchains; local-lvm on desktop-01 has room
 
   # node/os/network/storage/timezone/onboot inherited from the DevOps stack
@@ -77,13 +80,21 @@ spec:
 
     # Beyond the provisioner's baseline (tmux, git, curl, ca-certificates,
     # ncurses-bin for tic, ncurses-term for the tmux-256color entry).
+    # ── Toolchain (#421). This stops being just a terminal and becomes a place to work.
+    homebrew: true              # Linuxbrew at /home/linuxbrew/.linuxbrew, driven by the
+                                # Brewfile in shell-assets/ so it stays declarative.
+                                # NOTE tmux is deliberately NOT in the Brewfile — brew's bin
+                                # comes first on PATH and tmux's client/server must match
+                                # versions, so a brew tmux would break `tmux attach` against
+                                # the apt-started server. See the Brewfile's own note.
+    claudeCode: true            # from Anthropic's signed apt repo. It is a Homebrew CASK, and
+                                # casks are macOS-only, so brew cannot install it here.
+                                # ⚠ Login is INTERACTIVE and one-time: run `claude` and follow
+                                #   the browser prompts. Converge installs it, not signs in.
+
+    # apt packages beyond the provisioner's baseline. Most day-to-day tools now come from the
+    # Brewfile instead; these are the ones that belong to the system rather than the toolchain.
     packages:
-      - ripgrep
-      - fd-find
-      - jq
-      - tree                     # the tmux-sidebar tree command
       - unzip
       - rsync
       - vim
-      - htop
-      - build-essential
