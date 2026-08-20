@@ -1,0 +1,38 @@
+# Brewfile — the shell host's toolchain, declared (superproject #421).
+#
+# Homebrew on Linux ("Linuxbrew") installs to /home/linuxbrew/.linuxbrew and runs as the
+# login user, never root. `brew bundle` makes it idempotent and declarative, which is why
+# brew earns a place on a converge-managed box at all: this file is the desired state, not
+# a list of things somebody once typed.
+#
+# ⚠ CASKS DO NOT WORK ON LINUX. Homebrew casks are macOS-only, so anything that only ships
+#   as a cask cannot come from here — Claude Code is exactly that case (it is a cask, 404 as
+#   a formula), and is installed from Anthropic's signed apt repo instead.
+#
+# ⚠ tmux IS DELIBERATELY ABSENT, and adding it would break your session.
+#   tmux's client and server must be the SAME VERSION. The server on this host is started by
+#   the systemd unit as /usr/bin/tmux (Debian's 3.5a). If brew's tmux were installed, brew's
+#   bin directory comes FIRST on PATH, so an interactive `tmux attach` would run a different
+#   binary than the running server and fail with "protocol version mismatch" — breaking the
+#   one thing this host exists to provide. Debian's tmux is current; leave it alone.
+#   A test in the superproject asserts this file contains no tmux entry.
+
+# .NET — what we build with day to day. The formula ships an x86_64_linux bottle at the same
+# version the laptop runs, and satisfies the repo's global.json (10.0.100, rollForward
+# latestMinor), so `dotnet build` behaves the same here as locally.
+brew "dotnet"
+
+# Git forge CLI — PRs and issues from the session, same as on the laptop.
+brew "gh"
+
+# The search kit Claude Code and day-to-day work both lean on. ripgrep is bundled inside
+# Claude Code, but having it on PATH is useful for everything else.
+brew "ripgrep"
+brew "fd"
+brew "jq"
+
+# Quality-of-life for living in a terminal for long stretches.
+brew "bat"
+brew "eza"
+brew "htop"
+brew "tree"
