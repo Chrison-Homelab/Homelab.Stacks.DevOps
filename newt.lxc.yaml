@@ -1,0 +1,67 @@
+# Newt — this stack's Pangolin site connector (superproject #441).
+#
+# Gives the DevOps stack its OWN Pangolin site, `DevOps`, rather than sharing Core's single
+# `local` site. That is the per-stack model (superproject #442) and it mirrors ADR-0005's
+# per-stack cloudflared tunnels: the boundary is the stack, so a stack's exposure travels
+# with the stack — including onto a VPS or another host later.
+#
+# WHY ITS OWN CT, not folded into cloudflared (CT 3004). 3004 already is this stack's
+# outbound connector, so co-locating looked tidy. Rejected for blast radius: if cloudflared
+# breaks, Newt keeps working, and vice versa. A dedicated CT can also be set up for exactly
+# what Newt needs (a root daemon, WireGuard) without shaping the tunnel CT around it.
+#
+# ⚠ NOT A CONTAINER, deliberately. Pangolin SSH resources require Newt running as ROOT on the
+#   connector host, and upstream states plainly that containerized installations are
+#   unsupported for SSH mode. So the `newt` provisioner installs the release binary as a root
+#   systemd service. This is a narrow, documented exception to ADR-0009's podman/quadlet
+#   direction — not an oversight. Do not "fix" it into a quadlet.
+#
+# CREDENTIALS. Pangolin issues a site's newtId + secret exactly ONCE, in the site-create
+# response; there is no API to read them back or regenerate them. Converge therefore creates
+# the site and captures them straight into the CT's env file (0600). If this CT is ever
+# rebuilt, the site will already exist and the credentials will be gone — regenerate them in
+# the dashboard (Sites → DevOps → Credentials) and set NEWT_ID + NEWT_SECRET in secrets.env,
+# which the provisioner prefers over creating. It will NOT delete and recreate the site to
+# recover, because a site owns its resources and would take them with it.
+#
+# Validate against ../../Infrastructure/schema/shape.schema.json.
+
+apiVersion: homelab/v1
+kind: LXC
+
+metadata:
+  name: newt
+  stack: DevOps
+  tags: [network, tunnel, wireguard, pangolin]
+
+spec:
+  app: debian           # plain base CT — the provisioner installs the newt binary itself
+  provisioner: newt
+  ctid: 3005            # 3000-3004 taken (forgejo, both runners, shell, cloudflared)
+  cores: 1
+  memory: 512           # MB — a single Go connector process
+  disk: 4               # GB — a ~20 MB binary and its logs
+
+  # node/os/network/storage/timezone/onboot inherited from the DevOps stack
+  # (node: desktop-01, VLAN 1010, DHCP).
+  #
+  # No DHCP reservation needed, unlike the shell host: this connector DIALS OUT and is never
+  # a target, so nothing has to resolve it by name.
+
+  config:
+    siteName: DevOps            # the Pangolin site this connector registers as. Defaults to
+                                # metadata.stack anyway; stated so it is obvious in the UI.
+    pangolinUrl: https://pangolin.chrison.dev
+    version: "1.16.0"           # pinned; bump deliberately (fosrl/newt releases)
+
+    # Where the integration API lives. It binds to 127.0.0.1 INSIDE the Pangolin CT, so
+    # converge reaches it with a curl executed in that CT — hence node + ctid, not a URL.
+    pangolinNode: nuc-01
+    pangolinCtid: "2013"
+    org: chrison-dev
+
+  # No `secrets:` block (avoids deriver fail-fast). The provisioner reads what it needs from
+  # the gitignored secrets.env via ctx.Secrets:
+  #   • PANGOLIN_API_KEY          → create the site + read back the one-time credentials.
+  #   • NEWT_ID / NEWT_SECRET     → OPTIONAL. When present they win, which is how a rebuilt
+  #                                 connector or dashboard-regenerated pair gets adopted.
