@@ -15,13 +15,21 @@
 # this stack still answers there. Both names resolving is fine — the record is
 # additive.
 #
-# NODE CHOICE. The milestone originally specced this for hpe-01 on the grounds
-# that desktop-01 is the on-demand sleep target (#191) and a session dialled into
-# unpredictably would block evacuation. That is still true — but desktop-01 has
-# the only silicon worth typing on (Ryzen 5 3600 / 12 threads / 2 TB NVMe) against
-# hpe-01's i5-6500T, and a dedicated always-on powernode is being bought to take
-# this over. So it lands here deliberately and temporarily. Moving it is a one-line
-# `node:` edit plus a converge — nothing below is node-specific.
+# NODE CHOICE — desktop-01, and not as a stopgap. Three reasons that all point the
+# same way: it is the most capable machine in the fleet (Ryzen 5 3600 / 12 threads /
+# 2 TB NVMe) against hpe-01's i5-6500T and nuc-01's i3-4010U; this is where the WORK
+# happens, so builds want the cores; and the DevOps stack's default node is already
+# desktop-01, so the shell host sits with the forge and the runners it drives rather
+# than reaching across nodes to them.
+#
+# The milestone originally specced hpe-01, on the grounds that desktop-01 is the
+# on-demand sleep target (#191) and a session dialled into unpredictably would block
+# evacuation. That trade-off is real but it resolves the other way: the sleep target
+# is the machine we can afford to keep awake, not the machine worth crippling.
+#
+# Moving it stays a one-line `node:` edit plus a converge — nothing below is
+# node-specific — so the always-on powernode remains an easy future home. It is no
+# longer the reason this CT is here.
 #
 # ⚠ While it lives here, desktop-01 must not be armed for sleep: PR3 of #191 is
 #   gated on evacuation, and this CT is exactly the workload that cannot be
@@ -45,12 +53,29 @@ spec:
   app: debian           # plain base CT (ct/debian.sh) — no community-scripts app to install
   provisioner: shell    # post-create dispatched to ShellProvisioner
   ctid: 3003            # the gap between github-runner (3002) and cloudflared (3004)
-  cores: 4
-  memory: 6144          # MB — bumped from 4096 (#421). Claude Code documents 4 GB as its
-                        # MINIMUM, and that was the whole allocation, with dotnet builds and
-                        # tmux panes competing for it. LXC memory is a cap, not a reservation,
-                        # so the headroom costs nothing until used.
-  disk: 32              # GB — checkouts + toolchains; local-lvm on desktop-01 has room
+  # ── Resources. This is the one CT on the fleet whose job is to be worked IN, so it
+  #    gets the largest slice of desktop-01 rather than a polite one.
+  cores: 8              # of desktop-01's 12 threads. CPU is the cheap axis to be generous on:
+                        # the LXC `cores` value is a scheduling weight, not a reservation, so
+                        # the other guests are not starved when this one is idle — and a
+                        # `dotnet build` here was measured at ~2x the laptop's wall-clock on 4.
+  memory: 8192          # MB — 6144 → 8192. Claude Code documents 4 GB as its MINIMUM, so half
+                        # the previous allocation was floor, with dotnet builds, a language
+                        # server and tmux/zellij panes competing for the rest.
+                        #
+                        # ⚠ THIS IS THE AXIS THAT IS ACTUALLY CONSTRAINED, and it is a node
+                        #   property, not a shape one. desktop-01 has 16 GB physical; declared
+                        #   guest memory across its running CTs is now ~25 GB, i.e. ~1.6x
+                        #   overcommitted. That is fine because LXC memory is a cap rather
+                        #   than a reservation (live usage sits near 3 GB), but the peak case
+                        #   — a full CI run on 3001+3002 while this host builds — is close to
+                        #   physical + swap. Do not raise this further without adding RAM to
+                        #   the node: it has 4 DIMM slots, 2 populated, DDR4-2400, 128 GB max.
+  swap: 2048            # MB — 512 → 2048. Elasticity for the cap above, so a transient spike
+                        # in one build reaches for swap instead of the OOM killer. The node
+                        # has 8 GB of swap and currently uses none of it.
+  disk: 64              # GB — 32 → 64. Checkouts, two toolchains (apt + brew) and NuGet/npm
+                        # caches. Effectively free: local-lvm on desktop-01 has ~1.4 TiB unused.
 
   # node/os/network/storage/timezone/onboot inherited from the DevOps stack
   # (node: desktop-01, VLAN 1010, DHCP).

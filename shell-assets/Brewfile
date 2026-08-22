@@ -36,3 +36,32 @@ brew "bat"
 brew "eza"
 brew "htop"
 brew "tree"
+
+# ── Zellij — a second multiplexer, running SIDE BY SIDE with tmux, not replacing it.
+#
+# On trial as the answer to a specific problem rather than as a taste preference: it ships
+# a BUILT-IN WEB CLIENT (`zellij web`, 0.43+), which is a browser terminal served by the
+# host itself. If that earns its keep it lets the public surface for this box be an ordinary
+# HTTP resource instead of Pangolin's `mode: ssh` resource — and, more to the point, lets
+# SSH here go back to keys only, since the browser route no longer needs an OS PASSWORD on
+# the account (superproject #440 / SHELL_USER_PASSWORD). Session resurrection is native, so
+# it also subsumes what tmux-resurrect/continuum do via TPM.
+#
+# tmux stays the default and keeps its curated config. Nothing here switches over; this
+# installs the binary so both can be lived in and compared.
+#
+# ⚠ NONE of tmux's dual-source hazard applies, and it is worth being explicit about why,
+#   because the rule above says brew must not supply a multiplexer. tmux's problem is TWO
+#   copies: apt's at /usr/bin (what the systemd unit starts) and brew's earlier on PATH, so
+#   client and server disagree on protocol version. zellij is NOT PACKAGED IN DEBIAN AT ALL
+#   (verified: no `zellij` in trixie's apt index), so brew is the only source and there is no
+#   second binary to disagree with. It is also why it has to come from here — 0.45 vs
+#   whatever a backport might one day carry, and the web client only exists from 0.43.
+#
+# ⚠ The web server REFUSES TO START without a config file. `zellij` itself runs fine on
+#   built-in defaults, but `zellij web` logs "Failed to find default config file path" and
+#   exits within a second, having already printed "Web Server started" — so it looks like it
+#   came up. It needs ~/.config/zellij/config.kdl to exist (`zellij setup --dump-config`).
+#   It also refuses any non-loopback bind without a cert: "Cannot bind to non-loopback IP:
+#   0.0.0.0 without an SSL certificate."
+brew "zellij"
