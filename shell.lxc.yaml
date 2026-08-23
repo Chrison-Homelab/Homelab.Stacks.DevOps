@@ -110,6 +110,31 @@ spec:
       fixedIp: 10.10.135.221
       localDnsRecord: shell.devops.chrison.internal
 
+  # ── TRIM. This host CHURNS: clone a large repo, fan out git worktrees, throw them away,
+  #    repeat. Without discard, every block freed inside the guest stays allocated to its
+  #    thin volume forever, so the CT creeps toward its 500 G ceiling no matter what `df`
+  #    reports inside it — and the blast radius of exhausting a shared LVM-thin pool is
+  #    EVERY guest on it going read-only, not just this one.
+  #
+  #    Inline (`discard`) rather than a periodic fstrim, deliberately: it keeps the reclaim
+  #    window at zero, needs no node-level timer to survive a rebuild or the eventual move
+  #    to the powernode, and travels with the shape. The whole chain is in place for it —
+  #    the pool is `Discards: passdown` and the 970 EVO Plus advertises discard.
+  #
+  #    Verified by churning 20 GiB through it (LV data% / pool data%):
+  #      baseline 2.08 / 18.02 → after writing 20 GiB 6.12 / 19.20 → after rm 2.18 / 18.05
+  #    i.e. reclaimed automatically, with no fstrim run at all.
+  #
+  # ⚠ THIS BLOCK IS CURRENTLY DECORATIVE — see superproject #480. `spec.rootfsOptions` is in
+  #   the schema and is parsed and inherited, but nothing in the engine ever reads it, so
+  #   validate passes, converge reports no drift, and the option never reaches the CT. It is
+  #   declared here as the record of intent; the live setting was applied by hand:
+  #       pct set 3003 --rootfs local-lvm:vm-3003-disk-0,size=500G,mountoptions=discard
+  #       pct reboot 3003          # mountoptions only take effect at container start
+  #   Confirm with `pct exec 3003 -- findmnt -n -o OPTIONS /` → expect `discard` in the list.
+  rootfsOptions:
+    mountoptions: discard
+
   # Deliberately NO `features: nesting` — this is a terminal, not a container host.
   # Add it when something here actually needs to run Docker, not in advance.
 
