@@ -65,3 +65,25 @@ brew "tree"
 #   It also refuses any non-loopback bind without a cert: "Cannot bind to non-loopback IP:
 #   0.0.0.0 without an SSL certificate."
 brew "zellij"
+
+# ── PowerShell. Not a preference — this repo family runs on it. Every script in the
+# superproject's src/Proxmox/ ships a .ps1 twin that must stay functionally in sync with its
+# .sh, secrets-sync has a .ps1 variant, and the house rule for .NET repos is that build/codegen
+# tooling is a Fallout target or PowerShell rather than bash or python. Without pwsh here, half
+# of what this box exists to work on cannot be run, only read.
+brew "powershell"
+
+# ── Node. Needed less for JS projects than for the ecosystem an agent reaches into: most MCP
+# servers are npx-launched, and a lot of dev tooling assumes a node runtime is simply present.
+# Claude Code itself does NOT need this — it ships its own runtime — so this is for everything
+# else, and it is the least load-bearing entry here.
+brew "node"
+
+# ── Bitwarden CLI (`bw`) — the password vault half of the secrets story. CLAUDE.md's rule is
+# that generated credentials go to Bitwarden, and doing that from this box needs the client.
+#
+# ⚠ This is NOT `bws`. The Secrets Manager CLI that `scripts/secrets-sync.sh` calls to generate
+#   secrets.env is a different tool, is not in homebrew-core under any name (checked: `bws` and
+#   `bitwarden-secrets-manager` both miss), and would have to be fetched from its GitHub release
+#   the way NewtProvisioner fetches newt. Until then this box cannot regenerate secrets.env.
+brew "bitwarden-cli"
