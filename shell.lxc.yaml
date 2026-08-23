@@ -74,8 +74,28 @@ spec:
   swap: 2048            # MB — 512 → 2048. Elasticity for the cap above, so a transient spike
                         # in one build reaches for swap instead of the OOM killer. The node
                         # has 8 GB of swap and currently uses none of it.
-  disk: 64              # GB — 32 → 64. Checkouts, two toolchains (apt + brew) and NuGet/npm
-                        # caches. Effectively free: local-lvm on desktop-01 has ~1.4 TiB unused.
+  disk: 500             # GB — 32 → 500. Deliberately generous: checkouts, two toolchains
+                        # (apt + brew), NuGet/npm caches, build outputs, and whatever an agent
+                        # decides to fetch. desktop-01's local-lvm is a 2 TB Samsung 970 EVO
+                        # Plus, so this is fast space and there is plenty of it.
+                        #
+                        # It costs nothing up front. local-lvm is LVM-THIN, so `size=500G` is a
+                        # virtual ceiling and the pool only consumes what is actually written —
+                        # growing this from 64 G moved the pool's Data% not at all (17.78% before
+                        # and after). Even the fully-written worst case fits: declared virtual
+                        # size across every volume on the pool is now ~1174 GiB against a
+                        # 1710 GiB pool, i.e. still UNDER-provisioned, not overcommitted.
+                        #
+                        # ⚠ ONE-WAY. LVM-thin cannot shrink a mounted rootfs, so lowering this
+                        #   number later is a rebuild, not an edit. It is a commitment, which is
+                        #   why the arithmetic above is written down rather than assumed.
+                        #
+                        # ⚠ The blast radius of filling it is the POOL, not this CT. A thin pool
+                        #   at 100% takes every guest on local-lvm read-only, and desktop-01's VG
+                        #   has only ~16 GiB unallocated so the pool cannot be extended out of
+                        #   trouble. `df` inside here now reads 492 G, and nothing gives an agent
+                        #   backpressure before that. Watch pool usage (Pulse, CT 4000), not this
+                        #   filesystem.
 
   # node/os/network/storage/timezone/onboot inherited from the DevOps stack
   # (node: desktop-01, VLAN 1010, DHCP).
