@@ -23,6 +23,39 @@ spec:
   # Post-create wiring (converge / BL-010 — NOT done by community-scripts):
   config:
     rootUrl: https://forgejo.chrison.dev   # provisioner sets [server] ROOT_URL + DOMAIN
+
+    # ── SSO against the homelab IdP (Homelab #485) ──────────────────────────────────
+    # Forgejo keeps auth sources in its DATABASE, not app.ini, so the provisioner drives
+    # `forgejo admin auth add-oauth` / `update-oauth` rather than editing a file. Idempotent
+    # by source NAME — and the name is load-bearing twice over: Forgejo builds its callback
+    # as <rootUrl>/user/oauth2/<name>/callback, and authentik registers exactly that URI.
+    # Renaming this without changing the blueprint breaks the redirect, not the login page.
+    #
+    # THE GATE IS IN AUTHENTIK, not here. Only homelab-admins and devops-admins are bound to
+    # the Forgejo application, so nobody else is issued a token at all. Forgejo's own
+    # DISABLE_REGISTRATION = true is the second line: an identity with no matching account
+    # cannot create one. `adminGroup` is about WHAT you are once admitted, not WHETHER.
+    #
+    # Credentials by reference. The same two keys are read by authentik's blueprint via
+    # `!Env`, so both ends are configured from one source and neither is copied out of a UI.
+    oidc:
+      name: authentik
+      discoveryUrl: https://identity.chrison.dev/application/o/forgejo/.well-known/openid-configuration
+      clientIdFrom: AUTHENTIK_FORGEJO_CLIENT_ID
+      clientSecretFrom: AUTHENTIK_FORGEJO_CLIENT_SECRET
+      # `profile` is what carries the groups claim; without it adminGroup silently never
+      # matches. The provisioner passes these as REPEATED --scopes flags, because Forgejo
+      # declares that option as a string slice and would otherwise store the whole phrase as
+      # one scope name.
+      scopes: openid profile email
+      groupClaim: groups
+      adminGroup: homelab-admins
+      # Links an authentik identity to an EXISTING Forgejo account by email on first sign-in.
+      # Paired with ENABLE_AUTO_REGISTRATION = false, which the provisioner writes: an unknown
+      # identity is refused rather than given a fresh account. Registration policy is
+      # unchanged by adding SSO, deliberately.
+      accountLinking: auto
+      usernameClaim: preferred_username
   # TLS is fronted by the cloudflared tunnel (see cloudflared.lxc.yaml).
 
   # Repo data on the NAS, host-level + gated (BL-016). A storage-backed volume
