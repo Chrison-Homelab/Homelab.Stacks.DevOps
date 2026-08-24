@@ -52,9 +52,29 @@ dotnet run --project Infrastructure/engine -- converge stacks/DevOps          # 
 dotnet run --project Infrastructure/engine -- converge stacks/DevOps --apply
 ```
 
-Shapes validate against the superproject's `Infrastructure/schema/shape.schema.json`. This repo
-also runs an opt-in `validate.yml` calling the superproject's reusable `_validate-shapes.yml`; it
-needs the `SCHEMA_RO_PAT` Actions secret in scope for this repo.
+Shapes validate against the superproject's `Infrastructure/schema/shape.schema.json`.
+
+This repo also has its **own** build, so its PRs are checked here rather than only in the
+superproject:
+
+```bash
+./build.sh              # validate shapes against the pinned portable validator
+./build.sh Bundle       # + produce dist/ (devops-<version>.tar.gz + MANIFEST.md)
+./build.sh Release      # + cut the GitHub Release a deploy consumes by tag
+```
+
+`.github/workflows/build.yml` runs the same `./build.sh` target on every PR, so local and CI
+cannot diverge. It needs the `SCHEMA_RO_PAT` Actions secret — it downloads the validator from
+the private superproject's `schema-v1` release — and that secret's org visibility already
+covers this repo (confirmed by the first green run).
+
+> The validator is **linux-x64 only**. On macOS `./build.sh` fails at `RestoreValidator` with a
+> message saying so; use `--skip ValidateShapes` locally and let CI do the validating, or run
+> the superproject's `./build.sh ValidateShapes`, which is the full-fidelity gate.
+
+⚠ `BundlePaths()` in `build/Build.cs` is **hand-maintained**. A new asset directory that is not
+listed there is silently omitted from the bundle rather than failing the build — cross-check it
+against the `assets:` keys in the shapes whenever a member is added.
 
 ## Gotchas specific to this stack
 
