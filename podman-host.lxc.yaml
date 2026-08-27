@@ -1,0 +1,128 @@
+# DevOps podman host — the stack's rootless Podman + quadlet host (ADR-0009, #447).
+#
+# DELIBERATELY GENERIC, exactly like stacks/SmartHome/podman-host.lxc.yaml. This is
+# *the DevOps stack's container host*, not "the browser box". The marketplace-tools
+# Chromium is simply the first service to land here — chosen as the pilot because it
+# is self-contained (one container, no NFS, all state in one volume) and nothing else
+# depends on it, so the fiddly rootless plumbing proves itself where the blast radius
+# is smallest. Further DevOps tooling joins as extra quadlets in podman-host/quadlets/
+# rather than as new one-app CTs.
+#
+# WHY A NEW CT AND NOT A QUADLET ON AN EXISTING HOST — #447 suggested landing this on
+# the Media podman host (CT 5114). That option IS available (Homelab.Stacks.Media
+# declares podman-host.lxc.yaml + podman-host/; it just looks absent locally when the
+# submodule is not initialised), so this is a deliberate choice against it, not an
+# absence of alternatives.
+#
+# The ADR-0009 rule quoted in SmartHome's host — "further SmartHome services join as
+# extra quadlets rather than as new one-app Docker CTs" — is scoped to services joining
+# THEIR OWN stack's host. It argues against one-app CTs inside a stack that already has
+# a podman host; it does not argue for parking one stack's tooling on another stack's
+# host. DevOps has no podman host, so creating one is the same act SmartHome (6004),
+# Monitoring (4001) and Media (5114) each already performed — not a violation of it.
+# The alternative homes were rejected on their merits:
+#   · Media 5114 — cross-stack. A browser holding a live Facebook session would share a
+#     host with Plex and both *arr fleets, coupling the lifecycle of a scraper to the
+#     media stack; a restart to fix a wedged Chrome would touch unrelated services.
+#   · Monitoring 4001 — stack.yaml says it is "deliberately NOT co-located with any
+#     other stack: this host watches everything else, so it needs its own lifecycle".
+#     It also holds Pulse's admin creds, API token and authentik client secret, and a
+#     browser carrying a live Facebook session does not belong in that blast radius
+#     in either direction.
+#   · SmartHome 6004 — sits on IoT VLAN 1040, firewalled off from 1010.
+# So this establishes the DevOps stack's own podman host, the same role 4001 and 6004
+# play for their stacks. Net CT count is unchanged versus the alternative of a
+# one-app CT, and the next piece of DevOps tooling costs zero CTs.
+#
+# ⚠ NODE OVERRIDE IS LOAD-BEARING. The DevOps stack default is `desktop-01`, which is
+# the designated on-demand SLEEP node (#191) — a browser hosted there would be asleep
+# precisely when a scheduled sweep wanted it. Pinned to hpe-01, which is an always-on
+# sentinel with the measured headroom for it (see #447: 9.1Gi available, load 0.47).
+# Longer term the natural home is node #4 once #334 unblocks; migrating means changing
+# this one line.
+#
+# WHAT THE ENGINE DOES HERE (app: podman → PodmanProvisioner, superproject #284):
+#   ct/podman.sh creates the CT (rootful podman + a root podman.socket), then the
+#   provisioner converts it to the rootless quadlet model — masks that socket, adds
+#   the non-root `podman` user with an in-map subuid range + linger, makes
+#   network-online.target reachable, renders the quadlets below and drives
+#   `systemctl --user`. Read docs/plans/284-podman-platform.md before touching a
+#   quadlet: the eleven gotchas there are all load-bearing.
+#
+# EXPOSURE — INTERNAL ONLY, AND THIS ONE MATTERS MORE THAN USUAL. No tunnel ingress,
+# no Pangolin route, no wildcard DNS. The container holds a logged-in Facebook
+# session, and the Chrome DevTools protocol has NO AUTHENTICATION WHATSOEVER: anything
+# that can reach its port gets full control of that session — read messages, post
+# listings, change the account. The quadlet therefore publishes CDP on the CT's
+# LOOPBACK only and is reached by SSHing INTO THIS CT and tunnelling. See
+# podman-host/README.md for the exact invocation and why the obvious
+# `ssh -L … root@hpe-01` is the wrong one.
+#
+# Validate against ../../Infrastructure/schema/shape.schema.json.
+
+apiVersion: homelab/v1
+kind: LXC
+
+metadata:
+  name: podman-host
+  stack: DevOps
+  tags: [podman, quadlet, container-host, adr-0009, browser-automation]
+
+spec:
+  app: podman            # community-scripts ct/podman.sh + the `podman` provisioner
+  ctid: 3006             # in-block (3000–3999); 3000 forgejo · 3001/3002 runners ·
+                         # 3003 shell · 3004 cloudflared · 3005 newt
+  node: hpe-01           # OVERRIDES the DevOps default of desktop-01 — see the node
+                         # note above; desktop-01 sleeps (#191), this must not.
+  cores: 2               # Chrome is the only real consumer; 2 is enough for a scraper
+                         # driving one or two tabs, and leaves hpe-01's 4 cores alone.
+  memory: 4096           # MB — Chrome alone sits at 1–1.5 GB with a few tabs, plus the
+                         # KasmVNC server, plus podman itself. 2048 was the first draft
+                         # and is too tight once /dev/shm is actually used (see the
+                         # quadlet's ShmSize): shm is tmpfs and counts against this.
+  disk: 12               # GB — the linuxserver image is ~2 GB of layers, the rest is
+                         # the Chrome profile volume (cache grows; it is disposable).
+
+  # DHCP reservation (#416) so the SSH target for the tunnel is stable. The DNS record
+  # rides the reservation, so name and lease move together and nothing points at a
+  # bare address again.
+  network:
+    reservation:
+      fixedIp: 10.10.204.36
+      name: devops podman-host (CT 3006)
+
+  features:
+    nesting: true        # rootless podman needs nesting for its own nested userns
+    keyctl: true         # containers keyring — settable only via the pct/SSH create path
+    fuse: true           # fuse-overlayfs fallback storage driver
+                         # NOTE: ct/podman.sh silently DROPS var_fuse; the provisioner
+                         # reconciles features from this shape after create (#284).
+
+  # node is set above; network/os/source/timezone otherwise inherited from stack.yaml
+  # (VLAN 1010, debian 13, unprivileged, onboot).
+
+  config:
+    # Rootless user + subuid window. The default 10000:50000 fits inside an
+    # unprivileged LXC's own 65536-uid map — the provisioner verifies this against
+    # /proc/self/uid_map and fails loudly rather than letting podman break at first run.
+    user: podman
+    quadlets: podman-host/quadlets
+
+    # Rootless API socket for local inspection (`podman ps` over the user socket).
+    userSocket: true
+
+    # ⚠ COCKPIT DELIBERATELY OFF, unlike SmartHome's host. Cockpit would put a
+    # privileged web console on the same CT as a browser holding live account
+    # credentials, on a VLAN the workstation can already reach. The management value
+    # is small here — one container — and `pct exec` plus the user socket cover it.
+    # cockpit: false   (omitted; the default)
+
+    # podman secrets seeded from the gitignored secrets.env, add-only (rotation is an
+    # explicit operator action, never a silent converge side effect).
+    #
+    # These gate the KasmVNC web UI, which is the one interactive surface: it exists so
+    # the Facebook login can be done by hand once. Without auth, anyone on VLAN 1010
+    # could open that UI and drive the logged-in session. Set both in secrets.env.
+    secrets:
+      chromium_kasm_user: CHROMIUM_KASM_USER
+      chromium_kasm_password: CHROMIUM_KASM_PASSWORD
