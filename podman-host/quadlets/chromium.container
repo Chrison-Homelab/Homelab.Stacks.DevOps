@@ -10,17 +10,18 @@
 # which also gives us the one thing a headless container cannot: a way to do the
 # interactive Facebook login by hand, once.
 #
-# ⚠ SECURITY — READ BEFORE CHANGING ANY PublishPort LINE.
+# ⚠ SECURITY — READ BEFORE CHANGING THE NETWORKING.
 # The Chrome DevTools protocol has NO AUTHENTICATION OF ANY KIND. There is no token, no
 # password, no ACL. Anything that can open a TCP connection to the CDP port gets full
 # control of this browser, and this browser holds a logged-in Facebook session: reading
 # DMs, posting and editing listings, changing account settings. Treat port 9222 as
 # equivalent to the account password.
-#   · CDP is published on 127.0.0.1 ONLY — the CT's loopback, reachable by nothing on
-#     the network. It is used via an SSH tunnel INTO THIS CT (see ../README.md).
-#   · The KasmVNC UI is published on all interfaces because it must be reachable
-#     interactively, and is therefore gated by CUSTOM_USER/PASSWORD below. That basic
-#     auth is the only thing standing between VLAN 1010 and the session.
+#   · CDP is on the CT's LOOPBACK only, because Chrome itself refuses to bind DevTools
+#     anywhere else (see the Network=host block). Reached by an SSH tunnel INTO THIS CT
+#     — see ../README.md, and note the obvious node-level tunnel is the wrong one.
+#   · The KasmVNC UI is on the CT's 3000/3001 and IS reachable on VLAN 1010, because it
+#     has to be for the one-time Facebook login. It is gated by CUSTOM_USER/PASSWORD,
+#     and that basic auth is the only thing between the VLAN and the session.
 #   · No Pangolin route, no wildcard DNS, no tunnel ingress. Ever.
 
 [Unit]
@@ -33,14 +34,32 @@ Image=lscr.io/linuxserver/chromium:latest
 ContainerName=chromium
 AutoUpdate=registry
 
-# ── Ports ─────────────────────────────────────────────────────────────────────────────
-# CDP, LOOPBACK-ONLY. The bind address here is the whole security control; dropping the
-# `127.0.0.1:` prefix would silently expose the session to the entire VLAN.
-PublishPort=127.0.0.1:9222:9222
-# KasmVNC web UI — the interactive surface for the one-time Facebook login. HTTP on 3000,
-# HTTPS (self-signed) on 3001. Gated by CUSTOM_USER/PASSWORD.
-PublishPort=3010:3000
-PublishPort=3011:3001
+# ── Networking: HOST, and this is load-bearing ────────────────────────────────────────
+# ⚠ DO NOT "FIX" THIS BACK TO PublishPort. That was the first design and it does not work,
+# for a reason that is invisible from the outside:
+#
+#   MODERN CHROME IGNORES --remote-debugging-address. Verified on Chrome 151 in this very
+#   image: given `--remote-debugging-port=9222 --remote-debugging-address=0.0.0.0`, the
+#   flags appear on the process cmdline and in CHROME_CLI, and Chrome then binds
+#   127.0.0.1:9222 ANYWAY — DevTools off-localhost was locked down years ago. `ss` inside
+#   the container shows 127.0.0.1:9222, not 0.0.0.0:9222.
+#
+#   With a bridge network, `PublishPort=127.0.0.1:9222:9222` therefore forwards to the
+#   container's EXTERNAL interface, where nothing listens. The failure is maximally
+#   confusing: the CT shows a healthy listener on 127.0.0.1:9222 (pasta), the container is
+#   up, Chrome has the right flags, curl INSIDE the container returns /json/version
+#   perfectly — and the tunnel still gets an empty reply.
+#
+# Host networking makes Chrome's own localhost bind land directly on the CT's loopback,
+# which is exactly the topology we wanted. It is also a STRONGER guarantee than the
+# publish ever was: CDP is now loopback-only because CHROME binds it that way and refuses
+# to do otherwise, not because of an argument someone could delete.
+#
+# Consequence: published ports do not apply under host networking, so KasmVNC is on the
+# CT's OWN 3000/3001 (not the 3010/3011 an earlier draft mapped). It is still reachable on
+# VLAN 1010 and still gated by CUSTOM_USER/PASSWORD — that basic auth remains the only
+# thing between the VLAN and the session.
+Network=host
 
 # ── Chrome's shared memory ────────────────────────────────────────────────────────────
 # Chrome hammers /dev/shm and the container default (64 MB) does NOT produce a clean
@@ -56,15 +75,20 @@ ShmSize=1g
 #   If it STILL refuses to start, the next step is CHROME_CLI=--no-sandbox — but that
 #   disables Chrome's renderer sandbox entirely, so try it only to confirm the diagnosis
 #   and prefer keeping the sandbox on.
-SecurityOpt=seccomp=unconfined
+#   ⚠ THIS MUST GO THROUGH PodmanArgs. `SecurityOpt=` is NOT a quadlet key — quadlet has
+#   SeccompProfile= (which takes a PATH, so it cannot express "unconfined"), and an
+#   unsupported key makes the generator reject THE WHOLE FILE, producing no unit at all.
+#   The failure mode is silent and misleading: `systemctl --user start chromium.service`
+#   reports "Unit chromium.service not found", which reads as a rendering or linger
+#   problem rather than a syntax error. Verify with:
+#       /usr/libexec/podman/quadlet -dryrun -user
+PodmanArgs=--security-opt seccomp=unconfined
 
 # ── Chrome flags ──────────────────────────────────────────────────────────────────────
-# ⚠ THE ADDRESS PAIR LOOKS CONTRADICTORY AND IS NOT. Chrome binds remote debugging to
-# the loopback of ITS OWN network namespace by default, which podman cannot forward to.
-# So Chrome listens on 0.0.0.0 *inside the container namespace*, and the loopback
-# restriction is applied one layer out by PublishPort above. Both halves are required:
-# drop the flag and the tunnel connects to nothing; drop the PublishPort bind address
-# and 0.0.0.0 becomes literal.
+# --remote-debugging-address=0.0.0.0 IS KEPT DELIBERATELY, even though Chrome 151 ignores
+# it (see the Network=host block above for the evidence). It costs nothing, it documents
+# the intent, and if a future Chrome ever honours it again the setup still works. What we
+# rely on is Chrome's localhost bind landing on the CT loopback via host networking.
 #
 # ⚠ AND CHROME VALIDATES THE HOST HEADER. It rejects DevTools requests whose Host is not
 # localhost or a bare IP — a defence against DNS rebinding. This is why the access path
@@ -72,13 +96,11 @@ SecurityOpt=seccomp=unconfined
 # hostname: Playwright's connectOverCDP fetches /json/version first, and that fetch is
 # what would get refused. A 403 on /json/version with everything else looking healthy is
 # this, not a networking fault.
+#
 # ⚠ QUOTED, AND IT MUST BE — same trap as pulse.container's OIDC_SCOPES. systemd's
 # `Environment=` splits an UNQUOTED value on whitespace, so writing this bare would set
-# CHROME_CLI=--remote-debugging-port=9222 and then discard
-# `--remote-debugging-address=0.0.0.0` as a malformed second assignment. The result is the
-# nastiest possible outcome: Chrome starts, CDP listens on the container's own loopback,
-# podman forwards to nothing, and the tunnel fails with a connection error that looks like
-# a networking problem rather than a missing flag.
+# CHROME_CLI=--remote-debugging-port=9222 and discard the rest as a malformed second
+# assignment. Verified in the generated ExecStart: it must appear as ONE quoted value.
 Environment="CHROME_CLI=--remote-debugging-port=9222 --remote-debugging-address=0.0.0.0"
 
 # ── KasmVNC auth ──────────────────────────────────────────────────────────────────────
