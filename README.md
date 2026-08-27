@@ -26,12 +26,20 @@ flowchart LR
 
 CTID block **3000–3999** (declared in [`stack.yaml`](stack.yaml); members inherit its `defaults`).
 
+> **`podman-host` (3006) overrides `node`.** The stack default is `desktop-01`, which is the
+> on-demand sleep node ([#191](https://github.com/Chrison-Homelab/Homelab/issues/191)); 3006 is
+> pinned to `hpe-01` because it hosts an always-on browser that a scheduled sweep has to reach.
+
 | CTID | Member | Script | Channel | Status |
 |------|--------|--------|---------|--------|
 | 3000 | [forgejo](forgejo.lxc.yaml) | `ct/forgejo.sh` | stable | ready to deploy |
 | 3001 | [forgejo-runner](forgejo-runner.lxc.yaml) | `ct/forgejo-runner.sh` | **dev** (ProxmoxVED) | ready — in-dev script |
 | 3002 | [github-runner](github-runner.lxc.yaml) | `ct/github-runner.sh` | stable | ready (new, independent of CT 2005) |
-| 3003 | woodpecker | — | — | **parked** — no community-script in either repo yet |
+| 3003 | [shell](shell.lxc.yaml) | `ct/debian.sh` + `shell` provisioner | stable | deployed |
+| 3004 | [cloudflared](cloudflared.lxc.yaml) | `ct/cloudflared.sh` | stable | deployed |
+| 3005 | [newt](newt.lxc.yaml) | `ct/debian.sh` + `newt` provisioner | stable | deployed |
+| 3006 | [podman-host](podman-host.lxc.yaml) | `ct/podman.sh` | stable | **new** ([#447](https://github.com/Chrison-Homelab/Homelab/issues/447)) — pinned to `hpe-01`, see [its README](podman-host/README.md) |
+| — | woodpecker | — | — | **parked** — no community-script in either repo yet |
 
 ## Deploying
 

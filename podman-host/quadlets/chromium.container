@@ -1,0 +1,120 @@
+# Chromium for marketplace-tools (#447) — a persistent, always-on browser with a CDP
+# endpoint, so the Facebook Marketplace / Trade Me scraping in ~/marketplace-tools stops
+# depending on a headed Chrome window on the MacBook (which dies whenever the window is
+# closed, and can never run unattended).
+#
+# HEADED CHROMIUM UNDER A VIRTUAL DISPLAY, NOT TRUE HEADLESS — this is a deliberate
+# choice, not laziness. Facebook and Trade Me both fingerprint for headless, and Trade Me
+# is ALREADY rate-limiting us (ERR_BLOCKED_BY_RESPONSE, handled with 30/60/90s backoff in
+# trademe.js and detail.js). linuxserver/chromium runs a real Chromium under KasmVNC,
+# which also gives us the one thing a headless container cannot: a way to do the
+# interactive Facebook login by hand, once.
+#
+# ⚠ SECURITY — READ BEFORE CHANGING ANY PublishPort LINE.
+# The Chrome DevTools protocol has NO AUTHENTICATION OF ANY KIND. There is no token, no
+# password, no ACL. Anything that can open a TCP connection to the CDP port gets full
+# control of this browser, and this browser holds a logged-in Facebook session: reading
+# DMs, posting and editing listings, changing account settings. Treat port 9222 as
+# equivalent to the account password.
+#   · CDP is published on 127.0.0.1 ONLY — the CT's loopback, reachable by nothing on
+#     the network. It is used via an SSH tunnel INTO THIS CT (see ../README.md).
+#   · The KasmVNC UI is published on all interfaces because it must be reachable
+#     interactively, and is therefore gated by CUSTOM_USER/PASSWORD below. That basic
+#     auth is the only thing standing between VLAN 1010 and the session.
+#   · No Pangolin route, no wildcard DNS, no tunnel ingress. Ever.
+
+[Unit]
+Description=Chromium (marketplace-tools CDP browser)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=lscr.io/linuxserver/chromium:latest
+ContainerName=chromium
+AutoUpdate=registry
+
+# ── Ports ─────────────────────────────────────────────────────────────────────────────
+# CDP, LOOPBACK-ONLY. The bind address here is the whole security control; dropping the
+# `127.0.0.1:` prefix would silently expose the session to the entire VLAN.
+PublishPort=127.0.0.1:9222:9222
+# KasmVNC web UI — the interactive surface for the one-time Facebook login. HTTP on 3000,
+# HTTPS (self-signed) on 3001. Gated by CUSTOM_USER/PASSWORD.
+PublishPort=3010:3000
+PublishPort=3011:3001
+
+# ── Chrome's shared memory ────────────────────────────────────────────────────────────
+# Chrome hammers /dev/shm and the container default (64 MB) does NOT produce a clean
+# error — it produces tab crashes, blank screenshots and "Target closed" mid-navigation,
+# which read like scraper bugs. Same reason authentik's quadlets set 512m. 1g is ample
+# for a couple of tabs. This is tmpfs, so it counts against the CT's 4096 MB.
+ShmSize=1g
+
+# ── Chrome's sandbox vs. nested userns ────────────────────────────────────────────────
+# Chrome's own sandbox needs syscalls that podman's default seccomp profile blocks, and
+# we are already three namespaces deep (LXC → rootless podman → container). Without this
+# Chromium exits immediately at startup. This is what linuxserver document for the image.
+#   If it STILL refuses to start, the next step is CHROME_CLI=--no-sandbox — but that
+#   disables Chrome's renderer sandbox entirely, so try it only to confirm the diagnosis
+#   and prefer keeping the sandbox on.
+SecurityOpt=seccomp=unconfined
+
+# ── Chrome flags ──────────────────────────────────────────────────────────────────────
+# ⚠ THE ADDRESS PAIR LOOKS CONTRADICTORY AND IS NOT. Chrome binds remote debugging to
+# the loopback of ITS OWN network namespace by default, which podman cannot forward to.
+# So Chrome listens on 0.0.0.0 *inside the container namespace*, and the loopback
+# restriction is applied one layer out by PublishPort above. Both halves are required:
+# drop the flag and the tunnel connects to nothing; drop the PublishPort bind address
+# and 0.0.0.0 becomes literal.
+#
+# ⚠ AND CHROME VALIDATES THE HOST HEADER. It rejects DevTools requests whose Host is not
+# localhost or a bare IP — a defence against DNS rebinding. This is why the access path
+# MUST be an SSH tunnel presenting `localhost:9222` and not, say, a reverse proxy on a
+# hostname: Playwright's connectOverCDP fetches /json/version first, and that fetch is
+# what would get refused. A 403 on /json/version with everything else looking healthy is
+# this, not a networking fault.
+# ⚠ QUOTED, AND IT MUST BE — same trap as pulse.container's OIDC_SCOPES. systemd's
+# `Environment=` splits an UNQUOTED value on whitespace, so writing this bare would set
+# CHROME_CLI=--remote-debugging-port=9222 and then discard
+# `--remote-debugging-address=0.0.0.0` as a malformed second assignment. The result is the
+# nastiest possible outcome: Chrome starts, CDP listens on the container's own loopback,
+# podman forwards to nothing, and the tunnel fails with a connection error that looks like
+# a networking problem rather than a missing flag.
+Environment="CHROME_CLI=--remote-debugging-port=9222 --remote-debugging-address=0.0.0.0"
+
+# ── KasmVNC auth ──────────────────────────────────────────────────────────────────────
+# Seeded from secrets.env via the shape's `secrets:` map — see ../../podman-host.lxc.yaml.
+Secret=chromium_kasm_user,type=env,target=CUSTOM_USER
+Secret=chromium_kasm_password,type=env,target=PASSWORD
+
+Environment=PUID=1000
+Environment=PGID=1000
+Environment=TZ=Pacific/Auckland
+# Window size the scrapers were written against — Marketplace and Trade Me are both
+# responsive, and a narrow viewport switches them to mobile layouts with different DOM,
+# which breaks the selectors rather than merely looking odd.
+Environment=CUSTOM_WIDTH=1920
+Environment=CUSTOM_HEIGHT=1080
+
+# ── State ─────────────────────────────────────────────────────────────────────────────
+# The Chrome profile lives under /config, so this volume is what makes the Facebook
+# session survive a restart — the equivalent of marketplace-tools/profile/ today.
+#
+# ⚠ DO NOT COPY THE LAPTOP'S profile/ DIRECTORY IN. Moving a session to a new device
+# fingerprint is very likely to trip Facebook's new-device check and can cost a
+# checkpoint/lockout on the account. Log in fresh through the KasmVNC UI instead — it is
+# a two-minute job, once.
+Volume=/home/podman/devops/data/chromium:/config
+
+[Service]
+# Gotcha 9 in docs/plans/284-podman-platform.md: podman does NOT create a missing
+# bind-mount source, it fails the unit. Create it before the container starts.
+ExecStartPre=/usr/bin/mkdir -p /home/podman/devops/data/chromium
+Restart=always
+RestartSec=10
+# Chrome under KasmVNC is slow to first paint on a cold image pull.
+TimeoutStartSec=300
+
+[Install]
+# Gotcha 6: without this the unit does not come back after a CT reboot, and the failure
+# is silent — the container is simply absent until someone starts it by hand.
+WantedBy=default.target
