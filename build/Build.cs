@@ -126,6 +126,11 @@ class Build : FalloutBuild
         var candidates = new[]
         {
             "stack.yaml", "shell-assets",
+            // podman-host/quadlets/*.container + its README. The *.lxc.yaml glob below already
+            // catches podman-host.lxc.yaml, which is what makes the omission dangerous: a
+            // bundle would carry the SHAPE without its quadlets, so a deploy from the tag
+            // creates CT 3006 and renders zero units — with nothing failing to say so.
+            "podman-host",
         };
         foreach (var yaml in RootDirectory.GlobFiles("*.lxc.yaml", "*.vm.yaml").OrderBy(p => p.Name))
             yield return yaml.Name;
