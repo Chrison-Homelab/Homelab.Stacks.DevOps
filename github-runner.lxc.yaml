@@ -13,6 +13,11 @@ metadata:
   tags: [ci, github]
 
 spec:
+  # The CI runner is the one DevOps member that must stay up: every deploy in the superproject
+  # runs on it. It was migrated off desktop-01 on 2026-09-05 (`pct migrate 3002 hpe-01 --restart`)
+  # so desktop-01 can auto-sleep (Homelab#191); node + onboot override the stack defaults.
+  node: hpe-01
+  onboot: true
   app: github-runner
   ctid: 3002
   cores: 4               # build muscle (overrides script default 2)

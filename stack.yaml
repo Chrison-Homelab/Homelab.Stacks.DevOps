@@ -31,7 +31,10 @@ spec:
     unprivileged: true
     storage: local-lvm
     templateStorage: local
-    onboot: true
+    # desktop-01 auto-sleeps now (Homelab#191): its guests are STOPPED and must not come back
+    # on a wake, or the node is never idle again. Anything that has to stay on lives on a
+    # sentinel and overrides this — see github-runner.lxc.yaml.
+    onboot: false
     network:
       bridge: vmbr0
       vlan: 1010          # real tag → interface name=vlan1010,tag=1010
