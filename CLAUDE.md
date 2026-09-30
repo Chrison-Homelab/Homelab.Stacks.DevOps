@@ -30,6 +30,8 @@ Self-hosted **source control + CI/CD** — the forge and the runners that build 
 | 3002 | `github-runner` | `github-runner` — self-hosted runner registered to the GitHub org |
 | 3003 | `shell` | `debian` + `provisioner: shell` — the long-lived tmux host (superproject #404) |
 | 3004 | `cloudflared` | `cloudflared` — this stack's dedicated tunnel |
+| 3006 | `podman-host` | `podman` — rootless quadlet host (marketplace Chromium) |
+| 3007 | `openbao` | `openbao` — secrets store trial (#609); provisioner only ASSERTS hardening, `tools/openbao-bootstrap.sh` does the one-off key work |
 
 **Internal naming:** the stack is moving to its own subdomain, `*.devops.chrison.internal`,
 rather than nesting under VLAN 1010's `homelab.chrison.internal` — so a name says which *stack*

@@ -1,0 +1,74 @@
+# OpenBao — the homelab's secrets store (Key Vault equivalent). TRIAL, superproject #609.
+#
+# The Linux Foundation fork of HashiCorp Vault: KV v2 with versions, an audit log, policies
+# and authentik OIDC, none of it behind a licence (Infisical self-hosted gates SSO, audit and
+# rotation). The plan it serves is removing the four hand-kept copies of every secret NAME
+# (Bitwarden SM → secrets.env.template → GitHub Actions secrets → _deploy-stack.yml
+# passthroughs), which is what #574/#578/#579 actually were. Nothing consumes it yet.
+#
+# ⚠ ITS OWN CT, ON PURPOSE (Christian's call, 2026-10-01). CT 3006 was the obvious home and
+#   was rejected: it runs a Chromium holding a live Facebook session behind an
+#   UNAUTHENTICATED DevTools port, and that shape's own header refuses to put Pulse's
+#   credentials next to it. The secrets store is a bigger prize than Pulse's credentials.
+#
+# ⚠ THE COMMUNITY-SCRIPTS INSTALL IS NOT SAFE AS SHIPPED. install/openbao-install.sh inits
+#   with ONE key share and writes BAO_UNSEAL_KEY and BAO_ROOT_TOKEN in plain text into
+#   /etc/openbao/openbao.env, plus a systemd drop-in that unseals from it on every start.
+#   That makes the seal decorative: the CT disk, and every PBS backup of it on the NAS,
+#   holds the keys to everything. tools/openbao-bootstrap.sh undoes it ONCE, from the
+#   workstation, so no key ever passes through converge or a log:
+#     rekey to 3 shares / threshold 2 → shares + a recovery note into Christian's
+#     Bitwarden vault → admin login created → root token revoked → the env lines and the
+#     unseal drop-in removed → restart → proven SEALED → unsealed with 2 shares.
+#   The `openbao` provisioner never touches keys. It only ASSERTS the hardened state and
+#   reports FAILED while plaintext keys exist, so converge cannot go green over a
+#   decorative seal.
+#
+# MANUAL UNSEAL IS THE DESIGN, NOT A GAP (Christian's call). After any restart it stays
+# SEALED until two shares are entered: `bao operator unseal` twice inside the CT, shares
+# from Bitwarden. We rarely reboot, and nothing on disk or in a backup can open it.
+# Bitwarden therefore stays the break-glass root of trust: the lab cannot hold the keys to
+# its own rebuild.
+#
+# EXPOSURE: LAN only (VLAN 1010), TLS on :8200 with the package's self-signed cert. No
+# Pangolin route or tunnel. CLI and API clients cannot complete an SSO interstitial, and a
+# secrets store gains nothing from being on the internet.
+#
+# Validate against ../../Infrastructure/schema/shape.schema.json.
+
+apiVersion: homelab/v1
+kind: LXC
+
+metadata:
+  name: openbao
+  stack: DevOps
+  tags: [secrets, openbao, security]
+  services:
+    - name: OpenBao
+      url: https://openbao.devops.chrison.internal:8200/ui/
+      icon: openbao
+      description: Secrets store (trial)
+
+spec:
+  app: openbao           # community-scripts ct/openbao.sh (deb package from openbao/openbao)
+  provisioner: openbao   # asserts the hardened state; never handles keys
+  ctid: 3007             # in-block: 3000 forgejo · 3001/3002 runners · 3003 shell ·
+                         # 3004 cloudflared · 3005 newt · 3006 podman-host
+  node: hpe-01           # OVERRIDES the DevOps default of desktop-01, which sleeps (#191).
+                         # A secrets store that is asleep is an outage for every consumer.
+  onboot: true           # overrides the stack default (false, for desktop-01's sake)
+  cores: 1               # a single Go binary; idles near zero
+  memory: 512            # MB
+  disk: 4                # GB — raft storage + audit log (rotated by logrotate)
+
+  network:
+    reservation:
+      fixedIp: 10.10.30.7
+      localDnsRecord: openbao.devops.chrison.internal
+      name: openbao (CT 3007)
+
+  config:
+    # The shape of the seal the provisioner insists on. Changing these is a `bao operator
+    # rekey`, not a converge.
+    keyShares: 3
+    keyThreshold: 2
