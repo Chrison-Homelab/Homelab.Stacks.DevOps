@@ -39,6 +39,7 @@ CTID block **3000–3999** (declared in [`stack.yaml`](stack.yaml); members inhe
 | 3004 | [cloudflared](cloudflared.lxc.yaml) | `ct/cloudflared.sh` | stable | deployed |
 | 3005 | [newt](newt.lxc.yaml) | `ct/debian.sh` + `newt` provisioner | stable | deployed |
 | 3006 | [podman-host](podman-host.lxc.yaml) | `ct/podman.sh` | stable | **new** ([#447](https://github.com/Chrison-Homelab/Homelab/issues/447)) — pinned to `hpe-01`, see [its README](podman-host/README.md) |
+| 3007 | [openbao](openbao.lxc.yaml) | `ct/openbao.sh` + `openbao` provisioner (assert-only) | stable | **trial** ([#609](https://github.com/Chrison-Homelab/Homelab/issues/609)) — `hpe-01`; harden once with [`tools/openbao-bootstrap.sh`](tools/openbao-bootstrap.sh) |
 | — | woodpecker | — | — | **parked** — no community-script in either repo yet |
 
 ## Deploying
