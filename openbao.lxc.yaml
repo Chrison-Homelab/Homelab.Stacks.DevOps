@@ -15,7 +15,10 @@
 #   with ONE key share and writes BAO_UNSEAL_KEY and BAO_ROOT_TOKEN in plain text into
 #   /etc/openbao/openbao.env, plus a systemd drop-in that unseals from it on every start.
 #   That makes the seal decorative: the CT disk, and every PBS backup of it on the NAS,
-#   holds the keys to everything. tools/openbao-bootstrap.sh undoes it ONCE, from the
+#   holds the keys to everything. (On 2026-10-01 it did not even get that far: the 2.7.0 .deb
+#   still ships `storage "file"`, which 2.7.0 removed, so the install died before its init.
+#   The provisioner now renders raft storage; upstream fix is community-scripts#17548.)
+#   tools/openbao-bootstrap.sh handles both starting states ONCE, from the
 #   workstation, so no key ever passes through converge or a log:
 #     rekey to 3 shares / threshold 2 → shares + a recovery note into Christian's
 #     Bitwarden vault → admin login created → root token revoked → the env lines and the
