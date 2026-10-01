@@ -9,7 +9,8 @@
 # PBS backup of it open the store. This script turns it into the design Christian chose:
 #
 #   1. audit log on, KV v2 at secret/, an `admin` policy + a `christian` userpass login
-#   2. REKEY to 3 shares / threshold 2           (the installer's single key stops working)
+#   2. INIT 2-of-3 directly if the installer never initialised (what CT 3007 got), or else
+#      REKEY its 1-of-1 to 2-of-3 (the installer's single key stops working)
 #   3. the 3 shares + the admin login go into Christian's Bitwarden vault, read back and compared
 #   4. root token REVOKED, plaintext lines + auto-unseal drop-in removed
 #   5. TLS cert re-issued with the real name/IP in its SAN (the package's has CN=OpenBao only)
@@ -74,8 +75,16 @@ EOF
 echo "$state" | jq -e 'has("error")|not' >/dev/null || die "OpenBao not answering in CT $CTID: $state"
 n=$(echo "$state" | jq .n); sealed=$(echo "$state" | jq .sealed); plain=$(echo "$state" | jq .plaintext)
 say "CT $CTID: initialised=$(echo "$state" | jq .initialized) shares=$n sealed=$sealed plaintext-keys-on-disk=$plain"
-[ "$n" = 1 ] && [ "$plain" = 1 ] && [ "$sealed" = false ] \
-  || die "not the fresh installer state (1 share, unsealed, keys on disk) — refusing. Already bootstrapped?"
+# Two starting states are accepted, nothing else:
+#   rekey — the installer's: initialised 1-of-1, unsealed, unseal key + root token in plaintext
+#   init  — never initialised. What CT 3007 actually got: the 2.7.0 .deb's `file` storage made
+#           the installer die before its init (#609), so we init 2-of-3 directly and no single
+#           key or on-disk root token ever exists.
+if [ "$(echo "$state" | jq .initialized)" = false ]; then MODE=init
+elif [ "$n" = 1 ] && [ "$plain" = 1 ] && [ "$sealed" = false ]; then MODE=rekey
+else die "neither a fresh install (1-of-1, keys on disk) nor uninitialised — refusing. Already bootstrapped?"
+fi
+say "mode: $MODE"
 [ "$TEST" = 1 ] || for it in "$ITEM_SHARES" "$ITEM_ADMIN"; do
   [ "$(bw list items --search "$it" | jq --arg n "$it" '[.[]|select(.name==$n)]|length')" = 0 ] \
     || die "Bitwarden already has an item named '$it' — refusing to create a second"
@@ -86,13 +95,11 @@ say "preflight OK"
 LIFELINE="$(mktemp -t openbao-shares)"; chmod 600 "$LIFELINE"
 ADMIN_PW="$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)"   # no quoting hazards
 
-# ── 1+2: configure with the installer's root token, then rekey ──────────────────────────
-say "configuring (audit, kv, admin policy, userpass) and rekeying to $THRESHOLD-of-$SHARES"
-in_ct > "$LIFELINE" <<EOF
-set -euo pipefail
-. /etc/openbao/openbao.env
-export BAO_ADDR=https://127.0.0.1:8200 BAO_SKIP_VERIFY=true BAO_TOKEN="\$BAO_ROOT_TOKEN"
+# The configuration both modes run, with $TOKEN set in the CT: audit log, KV v2, admin policy,
+# userpass login. Emitted into the remote script, so the password travels on stdin only.
+configure() { cat <<CFG
 install -d -o openbao -g openbao -m 750 /var/log/openbao
+export BAO_ADDR=https://127.0.0.1:8200 BAO_SKIP_VERIFY=true BAO_TOKEN="\$TOKEN"
 bao audit list -format=json 2>/dev/null | jq -e 'has("file/")' >/dev/null \
   || bao audit enable file file_path=/var/log/openbao/audit.log >/dev/null
 bao secrets list -format=json | jq -e 'has("secret/")' >/dev/null \
@@ -101,19 +108,53 @@ printf '%s\n' 'path "*" { capabilities = ["create","read","update","delete","lis
   | bao policy write admin - >/dev/null
 bao auth list -format=json | jq -e 'has("userpass/")' >/dev/null || bao auth enable userpass >/dev/null
 printf '%s' '${ADMIN_PW}' | bao write auth/userpass/users/christian password=- policies=admin >/dev/null
+CFG
+}
+
+ROOT=""   # init mode only: the root token from init, revoked in phase 4
+if [ "$MODE" = rekey ]; then
+  # ── 1+2 (rekey): configure with the installer's root token, then rekey ─────────────────
+  say "configuring (audit, kv, admin policy, userpass) and rekeying to $THRESHOLD-of-$SHARES"
+  in_ct > "$LIFELINE" <<EOF
+set -euo pipefail
+. /etc/openbao/openbao.env
+TOKEN="\$BAO_ROOT_TOKEN"
+$(configure)
 # Rekey over the HTTP API: bodies go in on stdin (--data @-), the token as a header read from a
 # process substitution, so neither the key nor the token is ever an argument.
-hdr() { printf 'X-Vault-Token: %s\n' "\$BAO_ROOT_TOKEN"; }
+hdr() { printf 'X-Vault-Token: %s\n' "\$TOKEN"; }
 nonce=\$(printf '{"secret_shares":$SHARES,"secret_threshold":$THRESHOLD}' \
   | curl -fsSk -X PUT -H @<(hdr) --data @- https://127.0.0.1:8200/v1/sys/rekey/init | jq -r .nonce)
 jq -nc --arg k "\$BAO_UNSEAL_KEY" --arg n "\$nonce" '{key:\$k,nonce:\$n}' \
   | curl -fsSk -X PUT -H @<(hdr) --data @- https://127.0.0.1:8200/v1/sys/rekey/update \
   | jq -c '{keys:.keys_base64}'
 EOF
+else
+  # ── 1+2 (init): initialise 2-of-3 directly ────────────────────────────────────────────
+  say "initialising $THRESHOLD-of-$SHARES"
+  in_ct > "$LIFELINE" <<EOF
+set -euo pipefail
+printf '{"secret_shares":$SHARES,"secret_threshold":$THRESHOLD}' \
+  | curl -fsSk -X PUT --data @- https://127.0.0.1:8200/v1/sys/init | jq -c '{keys:.keys_base64, root:.root_token}'
+EOF
+  ROOT="$(jq -r '.root // empty' "$LIFELINE" 2>/dev/null)"
+  [ -n "$ROOT" ] || die "init returned no root token. Lifeline (may hold the shares): $LIFELINE — do NOT delete it."
+fi
 [ "$(jq '.keys|length' "$LIFELINE" 2>/dev/null)" = "$SHARES" ] \
-  || die "rekey did not return $SHARES shares. Lifeline (may be empty or partial): $LIFELINE — do NOT delete it."
-say "rekey done — $SHARES new shares held only in $LIFELINE until Bitwarden has them"
+  || die "$MODE did not return $SHARES shares. Lifeline (may be empty or partial): $LIFELINE — do NOT delete it."
+say "$MODE done — $SHARES shares held only in $LIFELINE until Bitwarden has them"
 S=(); while IFS= read -r k; do S+=("$k"); done < <(jq -r '.keys[]' "$LIFELINE")   # bash 3.2: no mapfile
+
+if [ "$MODE" = init ]; then
+  say "unsealing with $THRESHOLD shares and configuring (audit, kv, admin policy, userpass)"
+  in_ct <<EOF || die "configure after init failed. Lifeline kept: $LIFELINE"
+set -euo pipefail
+printf '{"key":"%s"}' '${S[0]}' | curl -fsSk -X PUT --data @- https://127.0.0.1:8200/v1/sys/unseal >/dev/null
+printf '{"key":"%s"}' '${S[1]}' | curl -fsSk -X PUT --data @- https://127.0.0.1:8200/v1/sys/unseal >/dev/null
+TOKEN='${ROOT}'
+$(configure)
+EOF
+fi
 
 # ── 3: Bitwarden, then read back and compare ────────────────────────────────────────────
 if [ "$TEST" = 0 ]; then
@@ -146,9 +187,9 @@ fi
 say "revoking root, removing plaintext keys + auto-unseal, re-issuing TLS, restarting"
 result=$(in_ct <<EOF
 set -euo pipefail
-. /etc/openbao/openbao.env
+. /etc/openbao/openbao.env 2>/dev/null || true
 export BAO_ADDR=https://127.0.0.1:8200 BAO_SKIP_VERIFY=true
-OLD_ROOT="\$BAO_ROOT_TOKEN"
+OLD_ROOT='${ROOT}'; [ -n "\$OLD_ROOT" ] || OLD_ROOT="\${BAO_ROOT_TOKEN:-}"
 BAO_TOKEN="\$OLD_ROOT" bao token revoke -self >/dev/null
 sed -i '/^BAO_UNSEAL_KEY=/d;/^BAO_ROOT_TOKEN=/d' /etc/openbao/openbao.env
 rm -f /etc/systemd/system/openbao.service.d/unseal.conf /etc/openbao/openbao-init.json
@@ -183,6 +224,6 @@ ok=$(echo "$result" | jq '(.sealed_after_restart==true) and (.sealed_now==false)
 
 [ "$TEST" = 1 ] && { say "TEST passed — lifeline left at $LIFELINE; delete it after the rollback"; exit 0; }
 rm -P "$LIFELINE" 2>/dev/null || rm -f "$LIFELINE"
-unset S ADMIN_PW
+unset S ADMIN_PW ROOT
 say "done: $THRESHOLD-of-$SHARES seal, root revoked, nothing on disk can unseal it, unsealed now."
 say "next: add CT $CTID to the PBS job (it was deliberately left out while the keys were on disk)."
