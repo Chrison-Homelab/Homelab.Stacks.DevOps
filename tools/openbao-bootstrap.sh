@@ -8,7 +8,8 @@
 # that unseals from that file on every start. The seal is then decorative: the CT disk and every
 # PBS backup of it open the store. This script turns it into the design Christian chose:
 #
-#   1. audit log on, KV v2 at secret/, an `admin` policy + a `christian` userpass login
+#   1. KV v2 at secret/, an `admin` policy + a `christian` userpass login (the audit log is
+#      declared in openbao.hcl by the provisioner; OpenBao 2.x refuses it over the API)
 #   2. INIT 2-of-3 directly if the installer never initialised (what CT 3007 got), or else
 #      REKEY its 1-of-1 to 2-of-3 (the installer's single key stops working)
 #   3. the 3 shares + the admin login go into Christian's Bitwarden vault, read back and compared
@@ -93,15 +94,15 @@ say "preflight OK"
 [ "$CHECK_ONLY" = 1 ] && exit 0
 
 LIFELINE="$(mktemp -t openbao-shares)"; chmod 600 "$LIFELINE"
-ADMIN_PW="$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)"   # no quoting hazards
+# Hex: no quoting hazards. And NO PIPE: `tr < /dev/urandom | head` dies of SIGPIPE under
+# pipefail, which killed the first rehearsal (exit 141) right after preflight.
+ADMIN_PW="$(openssl rand -hex 24)"
 
-# The configuration both modes run, with $TOKEN set in the CT: audit log, KV v2, admin policy,
-# userpass login. Emitted into the remote script, so the password travels on stdin only.
+# The configuration both modes run, with $TOKEN set in the CT: KV v2, admin policy, userpass
+# login. NOT the audit device: OpenBao 2.x refuses to create one over the API ("use declarative,
+# config-based audit device management"), so the provisioner declares it in openbao.hcl. Emitted into the remote script, so the password travels on stdin only.
 configure() { cat <<CFG
-install -d -o openbao -g openbao -m 750 /var/log/openbao
 export BAO_ADDR=https://127.0.0.1:8200 BAO_SKIP_VERIFY=true BAO_TOKEN="\$TOKEN"
-bao audit list -format=json 2>/dev/null | jq -e 'has("file/")' >/dev/null \
-  || bao audit enable file file_path=/var/log/openbao/audit.log >/dev/null
 bao secrets list -format=json | jq -e 'has("secret/")' >/dev/null \
   || bao secrets enable -path=secret -version=2 kv >/dev/null
 printf '%s\n' 'path "*" { capabilities = ["create","read","update","delete","list","sudo"] }' \
@@ -114,7 +115,7 @@ CFG
 ROOT=""   # init mode only: the root token from init, revoked in phase 4
 if [ "$MODE" = rekey ]; then
   # ── 1+2 (rekey): configure with the installer's root token, then rekey ─────────────────
-  say "configuring (audit, kv, admin policy, userpass) and rekeying to $THRESHOLD-of-$SHARES"
+  say "configuring (kv, admin policy, userpass) and rekeying to $THRESHOLD-of-$SHARES"
   in_ct > "$LIFELINE" <<EOF
 set -euo pipefail
 . /etc/openbao/openbao.env
@@ -146,7 +147,7 @@ say "$MODE done — $SHARES shares held only in $LIFELINE until Bitwarden has th
 S=(); while IFS= read -r k; do S+=("$k"); done < <(jq -r '.keys[]' "$LIFELINE")   # bash 3.2: no mapfile
 
 if [ "$MODE" = init ]; then
-  say "unsealing with $THRESHOLD shares and configuring (audit, kv, admin policy, userpass)"
+  say "unsealing with $THRESHOLD shares and configuring (kv, admin policy, userpass)"
   in_ct <<EOF || die "configure after init failed. Lifeline kept: $LIFELINE"
 set -euo pipefail
 printf '{"key":"%s"}' '${S[0]}' | curl -fsSk -X PUT --data @- https://127.0.0.1:8200/v1/sys/unseal >/dev/null
