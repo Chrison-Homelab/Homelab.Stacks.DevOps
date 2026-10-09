@@ -57,7 +57,8 @@ spec:
   provisioner: openbao   # asserts the hardened state; never handles keys
   ctid: 3007             # in-block: 3000 forgejo · 3001/3002 runners · 3003 shell ·
                          # 3004 cloudflared · 3005 newt · 3006 podman-host
-  node: hpe-01           # OVERRIDES the DevOps default of desktop-01, which sleeps (#191).
+  node: hpe-02           # OVERRIDES the DevOps default of desktop-01, which sleeps (#191). Moved off
+                         # hpe-01 2026-10-09 so secrets survive an hpe-01 outage or reboot.
                          # A secrets store that is asleep is an outage for every consumer.
   onboot: true           # overrides the stack default (false, for desktop-01's sake)
   cores: 1               # a single Go binary; idles near zero
